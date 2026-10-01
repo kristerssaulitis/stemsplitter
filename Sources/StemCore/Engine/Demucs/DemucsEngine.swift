@@ -51,8 +51,15 @@ public actor DemucsEngine: StemEngineProtocol {
         let task = Task.detached(priority: .userInitiated) { () throws -> HTDemucsSeparator in
             guard let url else { throw StemError.modelMissing("htdemucs.mlmodelc not in bundle") }
             do {
+                #if targetEnvironment(simulator)
+                // The Simulator's GPU path returns all-zero stems for this graph.
+                return try HTDemucsSeparator(modelURL: url, computeUnits: .cpuOnly)
+                #else
                 // GPU: the ANE compiler rejects this graph (same as on Mac).
-                return try HTDemucsSeparator(modelURL: url, computeUnits: .cpuAndGPU)
+                let gpu = try HTDemucsSeparator(modelURL: url, computeUnits: .cpuAndGPU)
+                if try Self.producesAudio(gpu) { return gpu }
+                return try HTDemucsSeparator(modelURL: url, computeUnits: .cpuOnly)
+                #endif
             } catch SeparatorError.modelMissing(let path) {
                 throw StemError.modelMissing(path)
             } catch {
@@ -66,6 +73,21 @@ public actor DemucsEngine: StemEngineProtocol {
             loadTask = nil  // let a later split retry
             throw error
         }
+    }
+
+    /// One synthetic segment through the model: a broken compute path returns silence.
+    static func producesAudio(_ separator: HTDemucsSeparator) throws -> Bool {
+        let L = separator.segmentLength
+        var x = [Float](repeating: 0, count: 2 * L)
+        for i in 0..<L {
+            let v = Float(0.3 * sin(Double(i) * 0.03) + 0.1 * sin(Double(i) * 0.4))
+            x[i] = v
+            x[L + i] = v
+        }
+        var energy: Float = 0
+        let y = try separator.separate(x)
+        vDSP_svesq(y, 1, &energy, vDSP_Length(y.count))
+        return energy.isFinite && energy > 1
     }
 
     public func split(_ sourceURL: URL) async -> AsyncStream<PipelineEvent> {

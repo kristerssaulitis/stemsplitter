@@ -131,7 +131,7 @@ public struct ResultView: View {
                 Button { share(.stems) } label: {
                     Label("All Stems", systemImage: "square.stack.3d.up")
                 }
-                ForEach(model.outputs.stems.isEmpty ? ["vocals", "instrumental"] : model.outputs.stems.map(\.name), id: \.self) { name in
+                ForEach(model.tracks.map(\.name) + (model.outputs.stems.contains { $0.name == "instrumental" } ? ["instrumental"] : []), id: \.self) { name in
                     Button { share(.stem(name)) } label: {
                         Label(StemStyle.title(name), systemImage: StemStyle.icon(name))
                     }
@@ -262,7 +262,7 @@ public struct ResultView: View {
         Menu {
             Picker("Pitch", selection: $model.pitch) {
                 ForEach((-6...6).reversed(), id: \.self) { st in
-                    Text(st == 0 ? "Original key" : String(format: "%+d semitones", st)).tag(st)
+                    Text(st == 0 ? "Original key" : String(format: abs(st) == 1 ? "%+d semitone" : "%+d semitones", st)).tag(st)
                 }
             }
         } label: {

@@ -267,7 +267,8 @@ public final class ResultModel: ObservableObject {
     }
 
     private var fileStem: String {
-        let cleaned = title.replacingOccurrences(of: "/", with: "-").trimmingCharacters(in: .whitespaces)
+        let cleaned = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: ".")
+            .trimmingCharacters(in: .whitespaces)
         return cleaned.isEmpty ? "Split" : cleaned
     }
 

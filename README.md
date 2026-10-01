@@ -1,8 +1,9 @@
 # StemSplitter
 
-Video-native, on-device stem splitter for iOS: pick a gallery video (MP4/MOV), split it
-into vocals + instrumental, play both stems, export WAV 44.1 kHz/24-bit via the share
-sheet. One flow — no account, no upload, nothing leaves your phone.
+Video-native, on-device stem splitter for iOS: pick a gallery video (or an audio file),
+split it into vocals / drums / bass / other with htdemucs, mix them (mute, solo, presets,
+pitch, speed) and export the mix, a video with the mix, or any stem as 24-bit WAV via the
+share sheet. No account, no upload, nothing leaves your phone.
 
 - Approved plan: `~/.gstack/projects/kristers/stemsplitter-no-branch-design-20261001.md`
 - Test plan (QA governance): `~/.gstack/projects/kristers/kristers-no-branch-eng-review-test-plan-20261001-063500.md`
@@ -11,8 +12,8 @@ sheet. One flow — no account, no upload, nothing leaves your phone.
 
 ## Requirements
 
-- Xcode (with iOS 17+ simulator; the repo assumes Xcode 16+)
-- iOS 17 minimum deployment target
+- Xcode (with an iOS 18+ simulator)
+- iOS 18 minimum deployment target (the Core ML model needs it)
 - Gate/benchmark device per the 2026-10-01 plan addendum: **iPhone 17 (A19)** — the
   simulator has no Neural Engine, so the performance bar is verified on device only
 - Personal Apple Developer Program membership for TestFlight/App Store (plan T11)
@@ -91,33 +92,20 @@ Key invariants (plan Review Sections 1–2, obligations):
   "Start again"; split WAVs live only in caches and are purged on next launch — share /
   Save to Files is the only persistence path.
 
-## Dropping in the real CoreML model
+## The separation model (htdemucs)
 
-The separation model ships as a pre-converted, bundled CoreML model (plan: "ModelStore
-(bundled .mlmodelc)"). To install the real one:
+The app ships Meta's htdemucs (4 stems: vocals, drums, bass, other; MIT licensed),
+converted by the Mac app's tooling. `Models/` is gitignored — set it up once:
 
-1. **Pick weights (license first).** v1 uses a 2-stem MDX-class model; the Day-1 spike
-   (plan T1/TE2) selects it. Non-commercial weights are rejected up front — the license
-   must allow commercial App Store distribution before anything else happens.
-2. **Convert to CoreML.** One-time macOS step with `coremltools`: load the ONNX/PyTorch
-   weights, export a 2-stem CoreML program with the model's training-contract STFT
-   window/hop and chunk shapes baked in. Keep the model ID + version string stable —
-   ETA calibration is keyed by it.
-3. **Compile.**
-   ```sh
-   xcrun coremlcompiler compile <Model>.mlmodel App/
-   ```
-   This produces `App/<Model>.mlmodelc`.
-4. **Add it to the app target.** Drag the `.mlmodelc` into `App/` and add it to the
-   StemSplitter target's resources in `StemSplitter.xcodeproj` (Copy Bundle Resources).
-5. **Load via ModelStore.** `Sources/StemCore/Support/ModelStore.swift` loads the bundled
-   compiled model at launch (async preload — the OS compiled-model cache removes
-   first-split compile latency) and surfaces `ModelLoadError` as the "couldn't start —
-   reinstall" alert if the resource is missing or corrupt. Compute-unit placement targets
-   the Neural Engine; a transparent CPU fallback only costs speed.
+```sh
+cp -R ../stemsplitter-mac/Models/htdemucs.mlpackage ../stemsplitter-mac/Models/htdemucs.mlmodelc Models/
+```
 
-Until the real model lands, the spike stub (`Spike/Sources/main.swift`) is the Day-1
-benchmark harness home.
+(Or regenerate with `../stemsplitter-mac/tools/convert_htdemucs.py`.) The Xcode target
+compiles `Models/htdemucs.mlpackage` into the app; `DemucsEngine` loads it on the GPU and
+falls back to CPU if a sanity segment comes back silent (the iOS Simulator's GPU path
+does this, so the simulator always uses CPU and is much slower than a device).
+`DemucsEngineTests` run the real model when `Models/htdemucs.mlmodelc` exists.
 
 ## Privacy posture
 

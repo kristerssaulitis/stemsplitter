@@ -12,6 +12,11 @@ final class DemucsEngineTests: XCTestCase {
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Models/htdemucs.mlmodelc")
 
+    func testSanityCheckDetectsWorkingModel() throws {
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: Self.modelURL.path), "no htdemucs model")
+        XCTAssertTrue(try DemucsEngine.producesAudio(HTDemucsSeparator(modelURL: Self.modelURL, computeUnits: .cpuOnly)))
+    }
+
     func testSplitWritesFiveStemsAndInstrumentalIsComplement() async throws {
         try XCTSkipUnless(FileManager.default.fileExists(atPath: Self.modelURL.path), "no htdemucs model")
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
