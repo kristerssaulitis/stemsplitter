@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>StemSplitter — Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    background: #ffffff;
+    color: #1d1d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0a0a0c; color: #f5f5f7; }
+    h1, h2 { color: #f5f5f7; }
+    .summary { border-color: #3a3a3e; background: #16161a; }
+    a { color: #9ab8ff; }
+  }
+  main { max-width: 44rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  h1 { font-size: 1.9rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.2rem; }
+  .updated { color: #86868b; font-size: 0.9rem; margin-top: 0; }
+  .summary {
+    border: 1px solid #d2d2d7; border-radius: 12px;
+    padding: 1rem 1.25rem; margin: 1.75rem 0 0;
+  }
+  .summary ul { margin: 0.5rem 0 0.25rem; padding-left: 1.25rem; }
+  li { margin: 0.3rem 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>StemSplitter Privacy Policy</h1>
+  <p class="updated">Last updated: October 1, 2026</p>
+
+  <div class="summary">
+    <p><strong>The short version:</strong></p>
+    <ul>
+      <li>All processing happens <strong>on your device</strong>. No audio or video is ever uploaded.</li>
+      <li><strong>We collect no data</strong> — no analytics, no tracking, no advertising.</li>
+      <li><strong>No accounts.</strong> The app has no sign-in and no user records of any kind.</li>
+      <li>The app makes <strong>no network requests</strong> and contains <strong>no third-party SDKs</strong>.</li>
+    </ul>
+  </div>
+
+  <h2>What StemSplitter does</h2>
+  <p>StemSplitter takes a video from your photo library, extracts its audio, and splits it
+  into vocals and instrumental tracks — entirely on your iPhone, using the device's own
+  processor and Neural Engine. The app works offline (in airplane mode) for videos already
+  stored on your phone.</p>
+
+  <h2>How your media is handled</h2>
+  <ul>
+    <li><strong>Video selection:</strong> picking a video uses Apple's system photo picker,
+    which runs outside the app. StemSplitter never gains access to your photo library and
+    receives only the one video you chose.</li>
+    <li><strong>Processing:</strong> the audio is decoded and split on your device. Nothing
+    is transmitted to any server, because the app has no server and no networking code.</li>
+    <li><strong>Temporary files:</strong> split audio files are written only to the app's
+    own caches on your device and are automatically deleted the next time you open the
+    app. They are never uploaded.</li>
+    <li><strong>Exports:</strong> when you share or save a WAV file, that file leaves the
+    app only because <em>you</em> send it somewhere (for example to Files or another app).
+    That transfer is handled entirely by iOS at your direction.</li>
+    <li><strong>iCloud videos:</strong> if you pick a video that isn't downloaded to your
+    phone, iOS itself fetches it from your own iCloud Photo Library using Apple's system
+    infrastructure. StemSplitter never sends your media anywhere.</li>
+  </ul>
+
+  <h2>Data we collect</h2>
+  <p>None. StemSplitter collects no data of any kind — no identifiers, no usage data, no
+  diagnostics, no location, no contacts, no audio or video content. There are no accounts,
+  so there are no user records to store or breach. The App Store's privacy label for
+  StemSplitter states "Data Not Collected," and the app ships a privacy manifest declaring
+  no tracking, no tracking domains, and no collected data types.</p>
+
+  <h2>Required-reason API disclosure</h2>
+  <p>To avoid filling your storage, StemSplitter checks how much free disk space is
+  available before starting a split, solely to decide whether there is enough room to
+  write the output files. This falls under Apple's required-reason API category for disk
+  space (reason code E174.1), which is declared in the app's privacy manifest. The app
+  uses no other required-reason APIs and does not read, store, or transmit file
+  timestamps or any other device information.</p>
+
+  <h2>Children's privacy</h2>
+  <p>Because StemSplitter collects no data at all, it collects nothing from anyone,
+  including children under 13.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If a future version of StemSplitter ever collected data or added third-party code,
+  this policy and the App Store privacy label would be updated first. As shipped, the app
+  cannot send your data anywhere.</p>
+
+  <h2>Contact</h2>
+  <!-- TODO(contact): replace with the developer's support address before this page is published. Tracked in Release/APP_STORE.md submission checklist. -->
+  <p>Questions about this policy: contact the developer via the support address listed on
+  StemSplitter's App Store page.</p>
+</main>
+</body>
+</html>

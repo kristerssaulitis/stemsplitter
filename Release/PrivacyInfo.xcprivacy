@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  StemSplitter privacy manifest (Apple NSPrivacyAPI, App Store requirement).
+
+  Truth basis (approved plan ~/.gstack/projects/kristers/stemsplitter-no-branch-design-20261001.md):
+  - No tracking, no tracking domains, no collected data types: the app makes no network
+    calls and has no analytics/third-party SDKs (plan Constraints; Review Section 3:
+    "nothing leaves the device. Privacy labels: no collection").
+  - The ONE required-reason API category in use is Disk Space (E174.1): the plan-mandated
+    disk preflight checks free space before writing split output ("free space must cover
+    ~32 MB per output minute x1.2 margin + 1 GB headroom"; StemError.preflight in the
+    frozen Sources/StemCore/Contracts/StemError.swift).
+  - File timestamp, system boot time, and active keyboard categories are NOT used; do not
+    add them unless the implementation actually does. If the implementation adds any
+    required-reason API usage, update this manifest in the same change.
+
+  Install: copy this file into the app target (App/) and add it to the StemSplitter
+  target's resources in StemSplitter.xcodeproj (Copy Bundle Resources).
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- E174.1: check whether there is sufficient disk space to write files. -->
+				<string>E174.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
