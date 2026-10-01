@@ -13,15 +13,32 @@ public struct AppFlowView: View {
     @StateObject private var model: AppFlowModel
     @State private var pickerItem: PhotosPickerItem?
     @State private var thumbnail: Image?
+    @State private var importingFile = false
+    @State private var importing = false
 
-    public init(engine: any StemEngineProtocol, makeAudio: @escaping @MainActor () -> any AudioControlling) {
-        _model = StateObject(wrappedValue: AppFlowModel(engine: engine, makeAudio: makeAudio))
+    public init(engine: any StemEngineProtocol) {
+        _model = StateObject(wrappedValue: AppFlowModel(engine: engine))
     }
 
     public var body: some View {
         ZStack {
             Color.ssGround.ignoresSafeArea()
             content
+            if importing {
+                Color.black.opacity(0.4).ignoresSafeArea()
+                ProgressView("Preparing…")
+                    .tint(.ssAccent)
+                    .foregroundStyle(Color.ssTextPrimary)
+                    .padding(DesignSystem.Spacing.unit3)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DesignSystem.Radius.card))
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(.ssAccent)
+        .animation(.easeInOut(duration: 0.25), value: model.route)
+        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.audio, .movie]) { result in
+            guard case .success(let url) = result else { return }
+            Task { await importFile(url) }
         }
         .alert(
             "Split interrupted",
@@ -45,10 +62,10 @@ public struct AppFlowView: View {
     private var content: some View {
         switch model.route {
         case .picker:
-            PickerHero(
+            HomeView(
                 showsExportFirstNotice: model.showsExportFirstNotice,
-                pickerDisabled: false,
-                selection: $pickerItem
+                selection: $pickerItem,
+                onImportFile: { importingFile = true }
             )
             .onChange(of: pickerItem) { _, item in
                 Task { await importPicked(item) }
@@ -87,7 +104,6 @@ public struct AppFlowView: View {
         // for the whole split; device auto-lock must not interrupt long splits.
         UIApplication.shared.isIdleTimerDisabled = (route == .processing)
         if route == .result {
-            // Success haptic when the split lands (CEO-2).
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
         #endif
@@ -96,76 +112,140 @@ public struct AppFlowView: View {
         }
     }
 
-    // MARK: PhotosPicker import glue (app-layer tmp copy, eng E5)
+    // MARK: Import glue (app-layer tmp copy, eng E5)
 
     private func importPicked(_ item: PhotosPickerItem?) async {
         guard let item else { return }
-        guard let imported = await VideoImporter.importVideo(item) else {
-            return // importer surfaced nothing usable; picker stays available
-        }
+        importing = true
+        defer { importing = false }
+        guard let imported = await VideoImporter.importVideo(item) else { return }
+        thumbnail = imported.thumbnail
+        model.pick(imported.video)
+    }
+
+    private func importFile(_ url: URL) async {
+        importing = true
+        defer { importing = false }
+        guard let imported = await VideoImporter.importFile(url) else { return }
         thumbnail = imported.thumbnail
         model.pick(imported.video)
     }
 }
 
-// MARK: - Picker hero (F1: empty state)
+// MARK: - Home (F1: empty state)
 
-/// Wordmark top; centered 170pt picker button; privacy sub-copy. No device
-/// hedge line in v1 (2026-10-01 addendum).
-struct PickerHero: View {
+struct HomeView: View {
 
     let showsExportFirstNotice: Bool
-    let pickerDisabled: Bool
     @Binding var selection: PhotosPickerItem?
+    let onImportFile: () -> Void
 
     var body: some View {
-        VStack(spacing: DesignSystem.Spacing.unit4) {
-            Text("StemSplitter")
-                .font(.largeTitle.bold())
-                .foregroundStyle(Color.ssTextPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, DesignSystem.Spacing.unit5)
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "waveform")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Color.ssAccent)
+                Text("StemSplitter")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Color.ssTextPrimary)
+                Spacer()
+            }
+            .padding(.top, DesignSystem.Spacing.unit2)
 
             Spacer()
 
-            PhotosPicker(selection: $selection, matching: .videos) {
-                VStack(spacing: DesignSystem.Spacing.unit2) {
-                    Image(systemName: "video.badge.plus")
-                        .font(.system(size: 44))
-                    Text("Pick a video")
-                        .font(.title3.weight(.semibold))
-                    Text("from your library")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.ssTextSecondary)
-                }
-                .foregroundStyle(Color.ssTextPrimary)
-                .frame(width: 170, height: 170)
-                .background(Circle().fill(Color.ssAccent.opacity(0.14)))
-                .overlay(Circle().strokeBorder(Color.ssAccent, lineWidth: 1.5))
-            }
-            .disabled(pickerDisabled)
-            .accessibilityLabel("Pick a video from your library")
+            StemStack()
+                .padding(.bottom, DesignSystem.Spacing.unit4)
 
-            Text("Nothing uploads. Nothing leaves your phone.")
-                .font(.footnote)
+            Text("Split any video\ninto stems")
+                .font(.system(size: 34, weight: .bold))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(Color.ssTextPrimary)
+            Text("Vocals, drums, bass and the rest — separated on your phone in seconds.")
+                .font(.body)
+                .multilineTextAlignment(.center)
                 .foregroundStyle(Color.ssTextSecondary)
+                .padding(.top, DesignSystem.Spacing.unit)
+                .padding(.horizontal, DesignSystem.Spacing.unit2)
 
             if showsExportFirstNotice {
-                Text("Export first — splits don't persist.")
-                    .font(.footnote.weight(.medium))
+                Label("Export what you need — splits clear when the app restarts.", systemImage: "info.circle")
+                    .font(.footnote)
                     .foregroundStyle(Color.ssAccent)
                     .padding(.vertical, DesignSystem.Spacing.unit)
                     .padding(.horizontal, DesignSystem.Spacing.unit2)
-                    .background(
-                        Capsule().fill(Color.ssAccent.opacity(0.14))
-                    )
-                    .accessibilityLabel("Export first. Splits don't persist.")
+                    .background(Capsule().fill(Color.ssAccent.opacity(0.12)))
+                    .padding(.top, DesignSystem.Spacing.unit3)
             }
 
             Spacer()
+
+            VStack(spacing: 12) {
+                PhotosPicker(selection: $selection, matching: .videos) {
+                    Label("Choose Video", systemImage: "play.rectangle.on.rectangle")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .accessibilityLabel("Choose a video from your library")
+
+                Button(action: onImportFile) {
+                    Label("Import Audio File", systemImage: "folder")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+
+                Label("Runs on this iPhone. Nothing is uploaded.", systemImage: "lock.fill")
+                    .font(.footnote)
+                    .foregroundStyle(Color.ssTextSecondary)
+                    .padding(.top, 4)
+            }
         }
-        .padding(.horizontal, DesignSystem.Spacing.unit5)
-        .padding(.bottom, DesignSystem.Spacing.unit4)
+        .padding(.horizontal, DesignSystem.Spacing.unit3)
+        .padding(.bottom, DesignSystem.Spacing.unit2)
+    }
+}
+
+/// Four stem lanes as the hero graphic: the product in one picture.
+private struct StemStack: View {
+    private let stems = ["vocals", "drums", "bass", "other"]
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ForEach(Array(stems.enumerated()), id: \.offset) { index, stem in
+                HStack(spacing: 10) {
+                    Image(systemName: StemStyle.icon(stem))
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(StemStyle.color(stem).opacity(0.18)))
+                        .foregroundStyle(StemStyle.color(stem))
+                    DecorativeWave(seed: index, color: StemStyle.color(stem))
+                        .frame(height: 26)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: 300)
+        .background(RoundedRectangle(cornerRadius: 20).fill(Color.ssSurface))
+        .accessibilityHidden(true)
+    }
+}
+
+private struct DecorativeWave: View {
+    let seed: Int
+    let color: Color
+
+    var body: some View {
+        Canvas { ctx, size in
+            let bars = Int(size.width / 4)
+            var path = Path()
+            for i in 0..<bars {
+                let x = Double(i)
+                let v = abs(sin(x * 0.37 + Double(seed) * 1.7) * cos(x * 0.11 + Double(seed)))
+                let h = max(2, v * size.height)
+                path.addRoundedRect(in: CGRect(x: CGFloat(i) * 4, y: (size.height - h) / 2, width: 2, height: h),
+                                    cornerSize: CGSize(width: 1, height: 1))
+            }
+            ctx.fill(path, with: .color(color.opacity(0.85)))
+        }
     }
 }
 
@@ -208,8 +288,12 @@ enum VideoImporter {
 
         let duration = (try? await asset.load(.duration))?.seconds ?? 0
         let metadata = (try? await asset.load(.metadata)) ?? []
-        let title = metadata.first { $0.commonKey == .commonKeyTitle }?.stringValue
-            ?? url.deletingPathExtension().lastPathComponent
+        // Picked movies arrive as UUID-named tmp files: name them by date instead.
+        var title = metadata.first { $0.commonKey == .commonKeyTitle }?.stringValue ?? ""
+        if title.isEmpty {
+            let created = try? await asset.load(.creationDate)?.load(.dateValue)
+            title = "Video · " + (created ?? Date()).formatted(date: .abbreviated, time: .shortened)
+        }
 
         var size: Int64?
         if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) {
@@ -227,6 +311,33 @@ enum VideoImporter {
             ),
             thumbnail: makeThumbnail(asset: asset)
         )
+    }
+
+    /// Files app import: copy out of the security scope into tmp, like the picker path.
+    static func importFile(_ url: URL) async -> Imported? {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent(url.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: url, to: target)
+        } catch {
+            return nil
+        }
+        let asset = AVURLAsset(url: target)
+        let duration = (try? await asset.load(.duration))?.seconds ?? 0
+        let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int64) ?? nil
+        return Imported(
+            video: PickedVideo(
+                id: target.path,
+                title: url.deletingPathExtension().lastPathComponent,
+                duration: max(0, duration.isFinite ? duration : 0),
+                localURL: target,
+                fileSizeBytes: size,
+                isCloudBacked: false),
+            thumbnail: makeThumbnail(asset: asset))
     }
 
     private static func makeThumbnail(asset: AVAsset) -> Image? {

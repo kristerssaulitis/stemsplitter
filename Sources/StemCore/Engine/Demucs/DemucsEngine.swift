@@ -81,7 +81,7 @@ public actor DemucsEngine: StemEngineProtocol {
                 let outputs = try await self.run(sourceURL, events: events)
                 events.yield(.completed(outputs))
             } catch {
-                let mapped = StemEngine.map(error, context: "demucs")
+                let mapped = Self.map(error)
                 if mapped != .cancelled { log.error("split failed: \(String(describing: mapped), privacy: .public)") }
                 events.yield(.failure(mapped))
             }
@@ -320,6 +320,14 @@ public actor DemucsEngine: StemEngineProtocol {
             bufR.removeFirst(drop)
             bufStart += drop
             seg += 1
+        }
+    }
+
+    private static func map(_ error: Error) -> StemError {
+        switch error {
+        case let e as StemError: e
+        case is CancellationError: .cancelled
+        default: .generic("demucs: \(String(describing: error))")
         }
     }
 

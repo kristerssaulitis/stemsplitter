@@ -100,19 +100,15 @@ public final class AppFlowModel: ObservableObject {
 
     /// Audio transport factory for the result screen (real: StemUI's
     /// AVStemPlayer; tests: mock). Core stays AVFoundation-free here.
-    private let makeAudio: @MainActor () -> any AudioControlling
-
     /// Preflight factory (tests inject a model with a stubbed probe; the
     /// default uses the real AVFoundation probe + disk check).
     private let makePreflight: @MainActor (PickedVideo) -> PreflightModel
 
     public init(
         engine: any StemEngineProtocol,
-        makeAudio: @escaping @MainActor () -> any AudioControlling,
         makePreflight: (@MainActor (PickedVideo) -> PreflightModel)? = nil
     ) {
         self.engine = engine
-        self.makeAudio = makeAudio
         self.makePreflight = makePreflight ?? { PreflightModel(video: $0) }
     }
 
@@ -172,14 +168,11 @@ public final class AppFlowModel: ObservableObject {
         switch terminal {
         case .completed(let outputs):
             guard let sourceURL = activeSourceURL else { return }
-            let peaks = processing?.peaks ?? []
-            let elapsed = processing?.elapsed ?? 0
             result = ResultModel(
-                sourceAudioURL: sourceURL,
+                title: video?.title ?? "Split",
+                sourceURL: sourceURL,
                 outputs: outputs,
-                peaks: peaks,
-                splitSeconds: elapsed,
-                audio: makeAudio()
+                splitSeconds: processing?.elapsed ?? 0
             )
             route = .result // AppFlowView fires the landing haptic on this transition (CEO-2)
         case .failed:
@@ -214,6 +207,7 @@ public final class AppFlowModel: ObservableObject {
     /// path (plan output lifecycle).
     public func newSplit() {
         guard route == .result else { return }
+        result?.stop()
         result = nil
         processing = nil
         preflight = nil

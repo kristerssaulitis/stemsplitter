@@ -18,15 +18,22 @@ public struct ProcessingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
-        VStack(spacing: DesignSystem.Spacing.unit4) {
-            VideoSummaryCard(
-                title: model.video.title,
-                duration: model.video.duration,
-                thumbnail: thumbnail
-            )
-            .padding(.top, DesignSystem.Spacing.unit5)
+        VStack(spacing: DesignSystem.Spacing.unit3) {
+            Spacer(minLength: DesignSystem.Spacing.unit2)
 
-            Spacer()
+            Artwork(thumbnail: thumbnail)
+                .frame(maxWidth: 320)
+
+            VStack(spacing: 4) {
+                Text(model.video.title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.ssTextPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                Text(formatClock(model.video.duration))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(Color.ssTextSecondary)
+            }
 
             if let failure = model.failure {
                 failureState(failure)
@@ -37,21 +44,13 @@ public struct ProcessingView: View {
             Spacer()
 
             if model.failure == nil {
-                Button {
-                    model.requestCancel()
-                } label: {
-                    Text("Cancel")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(RoundedRectangle(cornerRadius: DesignSystem.Radius.card)
-                            .fill(Color.ssTextSecondary.opacity(0.16)))
-                        .foregroundStyle(Color.ssTextPrimary)
-                }
-                .accessibilityLabel("Cancel this split")
+                Button("Cancel") { model.requestCancel() }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .accessibilityLabel("Cancel this split")
             }
         }
-        .padding(.horizontal, DesignSystem.Spacing.unit5)
-        .padding(.bottom, DesignSystem.Spacing.unit4)
+        .padding(.horizontal, DesignSystem.Spacing.unit3)
+        .padding(.bottom, DesignSystem.Spacing.unit2)
         .overlay(alignment: .center) {
             if model.phase == .downloading {
                 iCloudDownloadModal(
@@ -81,65 +80,66 @@ public struct ProcessingView: View {
 
     // MARK: Progress (F2/F7)
 
+    private static let stems = ["vocals", "drums", "bass", "other"]
+
     @ViewBuilder
     private var progressState: some View {
-        VStack(spacing: DesignSystem.Spacing.unit4) {
-            // The one authored motion moment: waveform bars landing as chunks
-            // complete. Reduce Motion swaps it for a static progress bar.
-            if reduceMotion {
-                VStack(alignment: .leading, spacing: DesignSystem.Spacing.unit) {
-                    ProgressView(value: model.progress)
-                        .tint(Color.ssAccent)
-                    Text("Splitting…")
-                        .font(.caption)
-                        .foregroundStyle(Color.ssTextSecondary)
-                }
-                .accessibilityElement(children: .combine)
-            } else {
-                WaveformView(peaks: model.peaks, fill: 1)
-                    .frame(height: 96)
-            }
-
-            HStack(spacing: DesignSystem.Spacing.unit4) {
-                ProgressRing(progress: model.progress)
-                    .frame(width: 88, height: 88)
-                    .overlay {
-                        Text("\(Int((model.progress * 100).rounded()))%")
-                            .font(.title3.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(Color.ssTextPrimary)
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Split progress")
-                    .accessibilityValue("\(Int((model.progress * 100).rounded())) percent")
-
-                VStack(alignment: .leading, spacing: DesignSystem.Spacing.unit) {
-                    if let eta = model.eta {
-                        Text("ETA \(formatClock(eta.seconds))")
-                            .font(.headline.monospacedDigit())
-                            .foregroundStyle(Color.ssTextPrimary)
-                        if eta.isInitial {
-                            Text("initial estimate")
-                                .font(.caption)
-                                .foregroundStyle(Color.ssTextSecondary)
+        VStack(spacing: DesignSystem.Spacing.unit2) {
+            // Each stem lane fills with the shared progress — the four outputs being made.
+            VStack(spacing: 8) {
+                ForEach(Self.stems, id: \.self) { stem in
+                    HStack(spacing: 10) {
+                        Image(systemName: StemStyle.icon(stem))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StemStyle.color(stem))
+                            .frame(width: 22)
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.white.opacity(0.07))
+                                Capsule().fill(StemStyle.color(stem))
+                                    .frame(width: max(6, geo.size.width * model.progress))
+                                    .animation(reduceMotion ? nil : .easeOut(duration: 0.4), value: model.progress)
+                            }
                         }
-                    } else {
-                        Text("Estimating…")
-                            .font(.headline)
+                        .frame(height: 6)
+                    }
+                }
+            }
+            .padding(DesignSystem.Spacing.unit2)
+            .background(RoundedRectangle(cornerRadius: DesignSystem.Radius.card).fill(Color.ssSurface))
+            .accessibilityHidden(true)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(Int((model.progress * 100).rounded()))%")
+                    .font(.system(size: 34, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Color.ssTextPrimary)
+                    .contentTransition(.numericText())
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(phaseLabel)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.ssTextPrimary)
+                    if let eta = model.eta, model.phase == .splitting {
+                        Text(eta.isInitial ? "about \(formatRemaining(eta.seconds))" : "\(formatRemaining(eta.seconds)) left")
+                            .font(.footnote.monospacedDigit())
                             .foregroundStyle(Color.ssTextSecondary)
                     }
-                    Text(phaseLabel)
-                        .font(.caption)
-                        .foregroundStyle(Color.ssTextSecondary)
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Split progress \(Int((model.progress * 100).rounded())) percent")
         }
+    }
+
+    private func formatRemaining(_ seconds: Double) -> String {
+        seconds < 60 ? "\(max(1, Int(seconds.rounded())))s" : formatClock(seconds)
     }
 
     private var phaseLabel: String {
         switch model.phase {
         case .downloading: "Downloading from iCloud"
-        case .decoding: "Reading audio"
-        case .splitting: "Splitting audio"
+        case .decoding: "Reading audio…"
+        case .splitting: "Separating stems…"
         case nil: "Starting…"
         }
     }
@@ -149,24 +149,16 @@ public struct ProcessingView: View {
     @ViewBuilder
     private func failureState(_ failure: StemError) -> some View {
         VStack(spacing: DesignSystem.Spacing.unit3) {
-            Image(systemName: "exclamationmark.triangle")
+            Image(systemName: "exclamationmark.triangle.fill")
                 .font(.largeTitle)
-                .foregroundStyle(Color.ssAccent)
+                .foregroundStyle(.orange)
             Text(failure.userMessage ?? "Split failed — try again")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Color.ssTextPrimary)
                 .multilineTextAlignment(.center)
 
-            Button {
-                onTryAgain()
-            } label: {
-                Text("Try again")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(RoundedRectangle(cornerRadius: DesignSystem.Radius.card)
-                        .fill(Color.ssAccent))
-                    .foregroundStyle(Color.ssGround)
-            }
+            Button("Try again") { onTryAgain() }
+                .buttonStyle(PrimaryButtonStyle())
             .accessibilityLabel("Try the split again")
 
             Button {
@@ -178,5 +170,26 @@ public struct ProcessingView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
         }
+    }
+}
+
+/// 16:9 thumbnail, or a waveform tile for audio-only sources.
+struct Artwork: View {
+    let thumbnail: Image?
+
+    var body: some View {
+        Color.ssSurface
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .overlay {
+                if let thumbnail {
+                    thumbnail.resizable().scaledToFill()
+                } else {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 44, weight: .medium))
+                        .foregroundStyle(Color.ssAccent)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DesignSystem.Radius.card))
+            .accessibilityHidden(true)
     }
 }

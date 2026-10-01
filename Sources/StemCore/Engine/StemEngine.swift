@@ -335,10 +335,21 @@ public actor StemEngine: StemEngineProtocol {
             /// split stop cooperatively at the next boundary. `nil` in production.
             public var onChunkBoundary: (@Sendable (PipelineStage, _ chunkIndex: Int) async throws -> Void)?
 
+            /// Invoked AFTER each chunk completes a stage's work, carrying the
+            /// wall-clock milliseconds the engine measured for that chunk's work in
+            /// that stage (the same measurement the per-chunk debug logs emit —
+            /// CEO row 16). The benchmark spike harness sums these per stage for the
+            /// per-stage wall-clock table; decode's value is the decode+resample
+            /// pull time accumulated up to the chunk cut. Sync and non-throwing —
+            /// observation must never unwind the pipeline. `nil` in production.
+            public var onChunkTimed: (@Sendable (PipelineStage, _ chunkIndex: Int, _ milliseconds: Double) -> Void)?
+
             public init(
-                onChunkBoundary: (@Sendable (PipelineStage, _ chunkIndex: Int) async throws -> Void)? = nil
+                onChunkBoundary: (@Sendable (PipelineStage, _ chunkIndex: Int) async throws -> Void)? = nil,
+                onChunkTimed: (@Sendable (PipelineStage, _ chunkIndex: Int, _ milliseconds: Double) -> Void)? = nil
             ) {
                 self.onChunkBoundary = onChunkBoundary
+                self.onChunkTimed = onChunkTimed
             }
         }
 
@@ -684,11 +695,20 @@ private struct PipelineRun: Sendable {
         let stft = try STFT()
         let chunker = StreamChunker()
         let iterator = extractor.chunks(from: sourceURL).makeAsyncIterator()
+        // Decode+resample pull time accumulated since the last chunk was cut —
+        // buffer granularity, attributed to the chunk the buffers complete.
+        var pendingDecodeMs = 0.0
 
-        while let buffer = try await iterator.next() {
+        while true {
+            let pullStart = ContinuousClock.now
+            let buffer = try await iterator.next()
+            pendingDecodeMs += Self.elapsedMs(since: pullStart)
+            guard let buffer else { break }
             chunker.append(buffer)
             while let piece = chunker.nextCompleteChunk() {
                 try await boundary(.decode, piece.index)
+                timed(.decode, piece.index, pendingDecodeMs)
+                pendingDecodeMs = 0
                 try await channel.send(try makeJob(piece, stft: stft))
             }
         }
@@ -701,6 +721,8 @@ private struct PipelineRun: Sendable {
         // Tail chunks, zero-padded to the fixed size (Section 2: "audio < 1 chunk: pad").
         while let piece = chunker.nextTailChunk(totalFrames: totalFrames) {
             try await boundary(.decode, piece.index)
+            timed(.decode, piece.index, pendingDecodeMs)
+            pendingDecodeMs = 0
             try await channel.send(try makeJob(piece, stft: stft))
         }
         log.debug("decode+chunk+stft stage done: \(chunker.chunksEmitted) chunks in \(Self.ms(since: stageStart)) ms")
@@ -730,7 +752,9 @@ private struct PipelineRun: Sendable {
             binCount: leftSpec.binCount,
             left: leftMag,
             right: rightMag)
-        log.debug("chunk \(piece.index): stft \(Self.ms(since: t0)) ms (\(leftSpec.frameCount)×\(leftSpec.binCount) bins)")
+        let stftMs = Self.elapsedMs(since: t0)
+        timed(.stft, piece.index, stftMs)
+        log.debug("chunk \(piece.index): stft \(Int(stftMs)) ms (\(leftSpec.frameCount)×\(leftSpec.binCount) bins)")
         return ChunkJob(
             chunk: Chunk(
                 index: piece.index, start: piece.start,
@@ -754,7 +778,9 @@ private struct PipelineRun: Sendable {
             try await boundary(.separate, job.chunk.index)
             let t0 = ContinuousClock.now
             let mask = try await model.separate(job.magnitudes)
-            log.debug("chunk \(job.chunk.index): separate \(Self.ms(since: t0)) ms [\(modelID, privacy: .public)]")
+            let separateMs = Self.elapsedMs(since: t0)
+            timed(.separate, job.chunk.index, separateMs)
+            log.debug("chunk \(job.chunk.index): separate \(Int(separateMs)) ms [\(modelID, privacy: .public)]")
             try await output.send(SeparatedChunk(job: job, mask: mask))
         }
     }
@@ -836,6 +862,7 @@ private struct PipelineRun: Sendable {
             pendingInstrumental = Array(instrumental[(advance * 2)..<(OLA.chunkSize * 2)])
             havePending = true
             lastStart = chunk.start
+            timed(.synthesize, chunk.index, Self.elapsedMs(since: t0))
             log.debug("chunk \(chunk.index): istft+ola \(Self.ms(since: t0)) ms")
         }
 
@@ -953,6 +980,7 @@ private struct PipelineRun: Sendable {
                     events.yield(.eta(measured))
                 }
                 log.debug("write block \(blockIndex): \(frames) frames in \(Self.ms(since: t0)) ms (gain \(appliedGain, format: .fixed(precision: 4)))")
+                timed(.write, blockIndex, Self.elapsedMs(since: t0))
                 blockIndex += 1
             }
 
@@ -976,6 +1004,19 @@ private struct PipelineRun: Sendable {
     }
 
     // MARK: Helpers
+
+    /// Fires the optional per-chunk stage-timing hook (`Hooks.onChunkTimed`).
+    private func timed(_ stage: PipelineStage, _ chunkIndex: Int, _ milliseconds: Double) {
+        configuration.hooks.onChunkTimed?(stage, chunkIndex, milliseconds)
+    }
+
+    /// Wall-clock milliseconds since `start` (Double variant of `ms(since:)`
+    /// for the timing hook — sub-millisecond stage work is real signal).
+    static func elapsedMs(since start: ContinuousClock.Instant) -> Double {
+        let elapsed = ContinuousClock.now - start
+        return Double(elapsed.components.seconds) * 1000
+            + Double(elapsed.components.attoseconds) / 1e15
+    }
 
     private static func maxAbs(_ interleaved: [Float]) -> Float {
         var peak: Float = 0

@@ -61,27 +61,6 @@ final class ViewModelTests: XCTestCase {
         }
     }
 
-    private final class MockAudioController: AudioControlling {
-        private(set) var loadedURL: URL?
-        private(set) var loadedPosition: TimeInterval = -1
-        private(set) var loadedPlay = false
-        var position: TimeInterval = 0
-        var duration: TimeInterval = 180
-        var isPlaying = false
-
-        func load(_ url: URL, at position: TimeInterval, play: Bool) {
-            loadedURL = url
-            loadedPosition = position
-            loadedPlay = play
-            self.position = position
-            isPlaying = play
-        }
-
-        func play() { isPlaying = true }
-        func pause() { isPlaying = false }
-        func seek(to time: TimeInterval) { position = time }
-    }
-
     private final class MockClock {
         var date = Date(timeIntervalSinceReferenceDate: 700_000_000)
     }
@@ -114,7 +93,6 @@ final class ViewModelTests: XCTestCase {
     ) -> AppFlowModel {
         AppFlowModel(
             engine: engine,
-            makeAudio: { MockAudioController() },
             makePreflight: { video in
                 PreflightModel(video: video, probeCheck: { _ in probeError })
             }
@@ -136,33 +114,54 @@ final class ViewModelTests: XCTestCase {
         app.proceedFromPreflight()
     }
 
-    // MARK: - Selector (F10)
+    // MARK: - Mixer (mute / solo / presets)
 
-    func testSelectorSwitchPreservesTransportPositionAndPlayback() {
-        let audio = MockAudioController()
-        let model = ResultModel(
-            sourceAudioURL: sourceURL,
-            outputs: SplitOutputs(vocalsURL: vocalsURL, instrumentalURL: instrumentalURL),
-            peaks: [],
-            splitSeconds: 42,
-            audio: audio
-        )
-        XCTAssertEqual(model.selected, .original)
-        audio.seek(to: 73.5)
-        audio.play()
+    private func makeResult(splitSeconds: TimeInterval = 42) -> ResultModel {
+        ResultModel(
+            title: "Concert",
+            sourceURL: sourceURL,
+            outputs: SplitOutputs(vocalsURL: vocalsURL, instrumentalURL: instrumentalURL, stems: [
+                StemTrack(name: "drums", url: URL(fileURLWithPath: "/tmp/drums.wav"), peaks: []),
+                StemTrack(name: "bass", url: URL(fileURLWithPath: "/tmp/bass.wav"), peaks: []),
+                StemTrack(name: "other", url: URL(fileURLWithPath: "/tmp/other.wav"), peaks: []),
+                StemTrack(name: "vocals", url: vocalsURL, peaks: []),
+                StemTrack(name: "instrumental", url: instrumentalURL, peaks: []),
+            ]),
+            splitSeconds: splitSeconds)
+    }
 
-        model.select(.vocals)
+    func testLanesAreModelStemsInDisplayOrderWithoutInstrumental() {
+        XCTAssertEqual(makeResult().tracks.map(\.name), ["vocals", "drums", "bass", "other"])
+    }
 
-        XCTAssertEqual(model.selected, .vocals)
-        XCTAssertEqual(audio.loadedURL, vocalsURL)
-        XCTAssertEqual(audio.loadedPosition, 73.5, accuracy: 0.001, "position must survive the switch")
-        XCTAssertTrue(audio.loadedPlay, "play state must survive the switch")
-        XCTAssertTrue(model.isPlaying)
-        XCTAssertEqual(model.position, 73.5, accuracy: 0.001)
+    func testSoloWinsOverMuteAndPresetsRoundTrip() {
+        let model = makeResult()
+        XCTAssertEqual(model.activePreset, .all)
+        model.toggleMute("vocals")
+        XCTAssertFalse(model.isAudible("vocals"))
+        XCTAssertEqual(model.activePreset, .karaoke, "muting vocals by hand is the karaoke preset")
+        model.toggleSolo("drums")
+        XCTAssertTrue(model.isAudible("drums"))
+        XCTAssertFalse(model.isAudible("bass"), "solo silences everything not soloed")
+        XCTAssertNil(model.activePreset)
+        model.apply(.acapella)
+        XCTAssertEqual(model.tracks.filter { model.isAudible($0.name) }.map(\.name), ["vocals"])
+        model.apply(.all)
+        XCTAssertTrue(model.isNeutral)
+    }
 
-        model.select(.instrumental)
-        XCTAssertEqual(audio.loadedURL, instrumentalURL)
-        XCTAssertEqual(audio.loadedPosition, 73.5, accuracy: 0.001)
+    func testMixLabelNamesWhatYouHear() {
+        let model = makeResult()
+        XCTAssertEqual(model.mixLabel, "mix")
+        model.apply(.karaoke)
+        model.pitch = 2
+        XCTAssertEqual(model.mixLabel, "Karaoke +2 st")
+        model.apply(.all)
+        model.pitch = 0
+        model.toggleSolo("vocals")
+        model.toggleSolo("bass")
+        model.rate = 0.9
+        XCTAssertEqual(model.mixLabel, "vocals + bass 90%")
     }
 
     // MARK: - Cancel confirmation gate (F11)
@@ -422,14 +421,8 @@ final class ViewModelTests: XCTestCase {
         }
         XCTAssertEqual(result.outputs.vocalsURL, vocalsURL)
         XCTAssertEqual(result.outputs.instrumentalURL, instrumentalURL)
-        XCTAssertEqual(result.peaks, [0.5], "streamed peaks feed the mini waveforms")
-
-        // Share payloads: primary = both stems; long-press = that stem only;
-        // Original shares nothing (stems only per plan).
-        XCTAssertEqual(result.shareStemsPayload, [vocalsURL, instrumentalURL])
-        XCTAssertEqual(result.sharePayload(for: .vocals), [vocalsURL])
-        XCTAssertEqual(result.sharePayload(for: .instrumental), [instrumentalURL])
-        XCTAssertEqual(result.sharePayload(for: .original), [])
+        XCTAssertEqual(result.title, "Concert")
+        XCTAssertEqual(result.tracks.map(\.name), ["vocals", "instrumental"], "2-stem outputs still get lanes")
     }
 
     // MARK: - Single-flight (CEO row 13 / S4)
@@ -493,38 +486,11 @@ final class ViewModelTests: XCTestCase {
     // MARK: - Export feedback (F6)
 
     func testExportFinishedShowsAndDismissesToast() {
-        let audio = MockAudioController()
-        let model = ResultModel(
-            sourceAudioURL: sourceURL,
-            outputs: SplitOutputs(vocalsURL: vocalsURL, instrumentalURL: instrumentalURL),
-            peaks: [],
-            splitSeconds: 84,
-            audio: audio
-        )
+        let model = makeResult()
         XCTAssertFalse(model.exportToastVisible)
         model.exportFinished()
         XCTAssertTrue(model.exportToastVisible, "success toast after share/Save completes")
         model.dismissExportToast()
         XCTAssertFalse(model.exportToastVisible)
-    }
-
-    // MARK: - Scrub
-
-    func testScrubFractionSeeksWithinDuration() {
-        let audio = MockAudioController()
-        audio.duration = 180
-        let model = ResultModel(
-            sourceAudioURL: sourceURL,
-            outputs: SplitOutputs(vocalsURL: vocalsURL, instrumentalURL: instrumentalURL),
-            peaks: [],
-            splitSeconds: 10,
-            audio: audio
-        )
-        model.scrub(toFraction: 0.5)
-        XCTAssertEqual(audio.position, 90, accuracy: 0.001)
-        model.scrub(toFraction: 2)
-        XCTAssertEqual(audio.position, 180, accuracy: 0.001, "clamps past the end")
-        model.scrub(toFraction: -1)
-        XCTAssertEqual(audio.position, 0, accuracy: 0.001, "clamps before the start")
     }
 }

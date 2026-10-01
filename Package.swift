@@ -15,6 +15,8 @@ let package = Package(
         // target-as-product ("Missing package product" at build-description time).
         .library(name: "StemCore", targets: ["StemCore"]),
         .library(name: "StemUI", targets: ["StemUI"]),
+        // Day-1 benchmark spike CLI (plan T1/TE2): `swift run spike <corpus-dir>`.
+        .executable(name: "spike", targets: ["Spike"]),
     ],
     targets: [
         .target(
