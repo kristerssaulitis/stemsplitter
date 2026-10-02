@@ -8,6 +8,14 @@ individual stem as 24-bit WAV — all through the share sheet.
 
 No account. No upload. Nothing leaves your phone.
 
+## Screenshots
+
+| Pick from your library | Ready to split |
+|:---:|:---:|
+| ![Home screen: pick a video or import an audio file](Screenshots/home.png) | ![Pre-flight check: audio found, disk space verified](Screenshots/preflight.png) |
+| **On-device separation** | **Mix, play, export** |
+| ![Split in progress: per-stem progress and ETA](Screenshots/processing.png) | ![Result: four stem lanes, presets, pitch/speed transport](Screenshots/result.png) |
+
 ## Features
 
 - **Video-native.** The camera roll is the library: pick a video, the audio track is
