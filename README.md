@@ -20,13 +20,19 @@ No account. No upload. Nothing leaves your phone.
 
 - **Video-native.** The camera roll is the library: pick a video, the audio track is
   extracted and resampled on device. Audio files import from the Files app too.
+- **Split from Link.** Paste a Spotify track/album/playlist or a YouTube video/playlist:
+  the track is matched on YouTube Music and fetched as AAC (the iOS port of
+  [stemsplitter-mac](https://github.com/kristerssaulitis/stemsplitter-mac)'s StemLink,
+  native URLSession instead of the spotdl subprocess), then it splits like any imported
+  file. Link lookups are the only network the app touches.
 - **4-stem separation** (vocals, drums, bass, other) with htdemucs running on the GPU
   via Core ML.
 - **Mixer** — mute/solo per stem, mix presets, pitch shift, speed — with live playback.
 - **Export** the mix, any stem as 44.1 kHz / 24-bit WAV, or the original video with the
   new mix — via the standard share sheet.
-- **Fully offline.** No network stack, no analytics, no third-party packages — only
-  Apple frameworks and the bundled model.
+- **Splitting is fully offline.** No analytics, no third-party packages — only Apple
+  frameworks and the bundled model. The optional link fetcher talks to Spotify's embed
+  endpoint and YouTube's player API; playback and splitting never touch the network.
 - **Streaming engine.** Chunks flow through STFT → model → inverse STFT with
   overlap-add; peak memory stays under 400 MB on a 15-minute split. Instrumental is
   derived by complement subtraction so stems sum back to the source exactly.

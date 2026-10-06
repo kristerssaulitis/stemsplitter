@@ -3,6 +3,8 @@ import PackageDescription
 
 // StemSplitter — on-device stem splitter (plan: Approach B, Stem Engine).
 // StemCore: contracts + engine + support. StemUI: design system + flow views.
+// StemLink: "split from link" — Spotify/YouTube link → audio file (iOS port of
+// stemsplitter-mac's StemLink, native URLSession instead of the spotdl subprocess).
 // Spike: Day-1 benchmark harness (plan T1/TE2). No third-party dependencies (plan S3).
 let package = Package(
     name: "StemSplitter",
@@ -15,6 +17,7 @@ let package = Package(
         // target-as-product ("Missing package product" at build-description time).
         .library(name: "StemCore", targets: ["StemCore"]),
         .library(name: "StemUI", targets: ["StemUI"]),
+        .library(name: "StemLink", targets: ["StemLink"]),
         // Day-1 benchmark spike CLI (plan T1/TE2): `swift run spike <corpus-dir>`.
         .executable(name: "spike", targets: ["Spike"]),
     ],
@@ -24,8 +27,12 @@ let package = Package(
             path: "Sources/StemCore"
         ),
         .target(
+            name: "StemLink",
+            path: "Sources/StemLink"
+        ),
+        .target(
             name: "StemUI",
-            dependencies: ["StemCore"],
+            dependencies: ["StemCore", "StemLink"],
             path: "Sources/StemUI"
         ),
         .executableTarget(
@@ -37,6 +44,11 @@ let package = Package(
             name: "StemCoreTests",
             dependencies: ["StemCore"],
             path: "Tests/StemCoreTests"
+        ),
+        .testTarget(
+            name: "StemLinkTests",
+            dependencies: ["StemLink"],
+            path: "Tests/StemLinkTests"
         ),
     ]
 )

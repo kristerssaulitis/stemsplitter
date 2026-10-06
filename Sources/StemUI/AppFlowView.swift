@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import AVFoundation
 import StemCore
+import StemLink
 
 // MARK: - AppFlowView
 
@@ -11,10 +12,13 @@ import StemCore
 public struct AppFlowView: View {
 
     @StateObject private var model: AppFlowModel
+    @StateObject private var linkModel = LinkDownloadModel()
     @State private var pickerItem: PhotosPickerItem?
     @State private var thumbnail: Image?
     @State private var importingFile = false
     @State private var importing = false
+    @State private var showingHistory = false
+    @State private var showingLinkSheet = false
 
     public init(engine: any StemEngineProtocol) {
         _model = StateObject(wrappedValue: AppFlowModel(engine: engine))
@@ -40,6 +44,20 @@ public struct AppFlowView: View {
             guard case .success(let url) = result else { return }
             Task { await importFile(url) }
         }
+        .sheet(isPresented: $showingHistory) {
+            HistoryView(
+                model: model.history,
+                onClose: { showingHistory = false },
+                onOpen: { entry in
+                    showingHistory = false
+                    model.openHistoryEntry(entry)
+                })
+                .presentationDetents([.large])
+        }
+        .sheet(isPresented: $showingLinkSheet) {
+            LinkDownloadSheet(model: linkModel)
+                .onAppear { linkModel.onSplit = { splitDownloaded($0) } }
+        }
         .alert(
             "Split interrupted",
             isPresented: Binding(
@@ -56,6 +74,32 @@ public struct AppFlowView: View {
         .onChange(of: model.route) { _, route in
             handleRouteChange(route)
         }
+        .onAppear {
+            simulatorQAHooks()
+        }
+    }
+
+    /// Simulator QA affordances (DEBUG only; idb tap automation is unavailable):
+    /// `-SSOpenHistory` presents the history sheet, `-SSOpenFirstHistoryEntry`
+    /// replays the newest saved split, `-SSOpenLinkSheet` presents the
+    /// "Split from Link" sheet. No effect in release builds.
+    private func simulatorQAHooks() {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("-SSOpenHistory") {
+            model.history.reload()
+            showingHistory = true
+        }
+        if args.contains("-SSOpenFirstHistoryEntry") {
+            model.history.reload()
+            if let entry = model.history.entries.first {
+                model.openHistoryEntry(entry)
+            }
+        }
+        if args.contains("-SSOpenLinkSheet") {
+            showingLinkSheet = true
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -63,9 +107,12 @@ public struct AppFlowView: View {
         switch model.route {
         case .picker:
             HomeView(
-                showsExportFirstNotice: model.showsExportFirstNotice,
+                history: model.history,
+                isLoadingHistoryEntry: model.isLoadingHistoryEntry,
                 selection: $pickerItem,
-                onImportFile: { importingFile = true }
+                onOpenHistory: { model.history.reload(); showingHistory = true },
+                onImportFile: { importingFile = true },
+                onLinkDownload: { showingLinkSheet = true }
             )
             .onChange(of: pickerItem) { _, item in
                 Task { await importPicked(item) }
@@ -92,8 +139,12 @@ public struct AppFlowView: View {
             }
         case .result:
             if let result = model.result {
-                ResultView(model: result, onNewSplit: { model.newSplit() })
-                    .transition(.opacity)
+                ResultView(
+                    model: result,
+                    onNewSplit: { model.newSplit() },
+                    onBack: model.resultIsFromHistory ? { model.closeHistoryResult() } : nil
+                )
+                .transition(.opacity)
             }
         }
     }
@@ -103,7 +154,8 @@ public struct AppFlowView: View {
         // Foreground-only processing (plan constraint): keep the display awake
         // for the whole split; device auto-lock must not interrupt long splits.
         UIApplication.shared.isIdleTimerDisabled = (route == .processing)
-        if route == .result {
+        // Landing haptic is for a fresh completion only, not a history replay.
+        if route == .result, model.resultIsFromHistory == false {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
         #endif
@@ -130,15 +182,33 @@ public struct AppFlowView: View {
         thumbnail = imported.thumbnail
         model.pick(imported.video)
     }
+
+    /// Link downloads enter the same flow as imported files (no thumbnail).
+    private func splitDownloaded(_ audio: FetchedAudio) {
+        guard model.route == .picker else { return }
+        showingLinkSheet = false
+        thumbnail = nil
+        model.pick(PickedVideo(
+            id: audio.fileURL.path,
+            title: audio.displayName,
+            duration: audio.duration,
+            localURL: audio.fileURL,
+            fileSizeBytes: audio.fileSizeBytes,
+            isCloudBacked: false))
+    }
 }
 
 // MARK: - Home (F1: empty state)
 
 struct HomeView: View {
 
-    let showsExportFirstNotice: Bool
+    /// Observed directly so the badge count tracks reloads/completions live.
+    @ObservedObject var history: HistoryModel
+    let isLoadingHistoryEntry: Bool
     @Binding var selection: PhotosPickerItem?
+    let onOpenHistory: () -> Void
     let onImportFile: () -> Void
+    let onLinkDownload: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -150,8 +220,24 @@ struct HomeView: View {
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Color.ssTextPrimary)
                 Spacer()
+                if history.entries.isEmpty == false {
+                    Button(action: onOpenHistory) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "clock.arrow.circlepath")
+                            Text("\(history.entries.count)")
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .frame(height: 34)
+                        .background(Capsule().fill(Color.ssSurface))
+                    }
+                    .accessibilityLabel("History, \(history.entries.count) saved \(history.entries.count == 1 ? "split" : "splits")")
+                }
             }
             .padding(.top, DesignSystem.Spacing.unit2)
+            .task { history.reload() } // fresh badge count on every pick visit
 
             Spacer()
 
@@ -169,19 +255,14 @@ struct HomeView: View {
                 .padding(.top, DesignSystem.Spacing.unit)
                 .padding(.horizontal, DesignSystem.Spacing.unit2)
 
-            if showsExportFirstNotice {
-                Label("Export what you need — splits clear when the app restarts.", systemImage: "info.circle")
-                    .font(.footnote)
-                    .foregroundStyle(Color.ssAccent)
-                    .padding(.vertical, DesignSystem.Spacing.unit)
-                    .padding(.horizontal, DesignSystem.Spacing.unit2)
-                    .background(Capsule().fill(Color.ssAccent.opacity(0.12)))
-                    .padding(.top, DesignSystem.Spacing.unit3)
-            }
-
             Spacer()
 
             VStack(spacing: 12) {
+                if isLoadingHistoryEntry {
+                    ProgressView("Opening…")
+                        .tint(.ssAccent)
+                        .foregroundStyle(Color.ssTextSecondary)
+                }
                 PhotosPicker(selection: $selection, matching: .videos) {
                     Label("Choose Video", systemImage: "play.rectangle.on.rectangle")
                 }
@@ -192,6 +273,12 @@ struct HomeView: View {
                     Label("Import Audio File", systemImage: "folder")
                 }
                 .buttonStyle(SecondaryButtonStyle())
+
+                Button(action: onLinkDownload) {
+                    Label("Split from Link", systemImage: "link")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .accessibilityLabel("Split a Spotify or YouTube link")
 
                 Label("Runs on this iPhone. Nothing is uploaded.", systemImage: "lock.fill")
                     .font(.footnote)
