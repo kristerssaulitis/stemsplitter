@@ -66,6 +66,12 @@ public final class StemMixer {
         for (p, f) in zip(players, files) where f.length > a {
             p.scheduleSegment(f, startingFrame: a, frameCount: AVAudioFrameCount(f.length - a), at: nil)
         }
+        #if os(iOS)
+        // .playback ignores the ring/silent switch; the default .soloAmbient is muted by it on device.
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default)
+        try? session.setActive(true)
+        #endif
         if !engine.isRunning {
             engine.prepare()
             guard (try? engine.start()) != nil else { return }
