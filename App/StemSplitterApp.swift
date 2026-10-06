@@ -7,8 +7,9 @@ struct StemSplitterApp: App {
     private let engine = DemucsEngine()
 
     init() {
-        // Splits live in caches only (plan output lifecycle): clear last launch's.
-        SplitStore(baseDirectory: SplitStore.defaultBaseDirectory()).purgeOnLaunch()
+        // History persists across launches (Application Support). Launch hygiene
+        // is orphans only: dead in-progress sessions from an interrupted split.
+        SplitStore(baseDirectory: SplitStore.defaultBaseDirectory()).purgeOrphans()
         let engine = self.engine
         Task.detached(priority: .utility) { await engine.prewarmModel() }
     }

@@ -110,10 +110,16 @@ public struct SplitOutputs: Equatable, Sendable {
     /// plus instrumental. Empty for 2-stem engines.
     public var stems: [StemTrack]
 
-    public init(vocalsURL: URL, instrumentalURL: URL, stems: [StemTrack] = []) {
+    /// The engine's `SplitStore` session dir holding these outputs. The app layer
+    /// writes display metadata there on completion (history persistence);
+    /// `nil` for engines runs that never created a session (mocks, tests).
+    public var sessionID: UUID?
+
+    public init(vocalsURL: URL, instrumentalURL: URL, stems: [StemTrack] = [], sessionID: UUID? = nil) {
         self.vocalsURL = vocalsURL
         self.instrumentalURL = instrumentalURL
         self.stems = stems
+        self.sessionID = sessionID
     }
 }
 

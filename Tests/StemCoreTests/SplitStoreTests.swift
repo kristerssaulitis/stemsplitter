@@ -1,9 +1,10 @@
 import XCTest
 @testable import StemCore
 
-/// T6 verification bar: session dir create/list under Caches/Splits/<uuid> with
-/// .inprogress marker; purge-on-launch; orphan purge (inprogress markers from
-/// dead sessions); garbage-header split dirs validated and deleted.
+/// History store verification bar: session dir create/list under <base>/<uuid>
+/// with .inprogress marker; completed sessions persist (launch hygiene is
+/// orphan purge only); metadata roundtrip; garbage-header split dirs validated
+/// and deleted.
 final class SplitStoreTests: XCTestCase {
 
     private var base: URL!
@@ -90,26 +91,28 @@ final class SplitStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.markCompleted(phantom))
     }
 
-    // MARK: - Purge on launch
+    // MARK: - Display metadata (history rows)
 
-    func testPurgeOnLaunchRemovesAllSessionDirs() throws {
+    func testMetadataRoundtrip() throws {
         let store = makeStore()
-        let completed = try store.createSession()
-        try writeWAV(completed.vocalsURL)
-        try writeWAV(completed.instrumentalURL)
-        try store.markCompleted(completed)
-        _ = try store.createSession() // in-progress orphan
+        let session = try store.createSession()
+        let date = Date(timeIntervalSince1970: 1_760_000_000)
 
-        store.purgeOnLaunch()
+        store.writeMetadata(SplitMetadata(title: "Neon Skyline", date: date, splitSeconds: 12.5), for: session.id)
 
-        XCTAssertTrue(store.listSessions().isEmpty)
-        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
-        XCTAssertTrue(leftovers.isEmpty, "expected empty base, found \(leftovers)")
+        let read = store.readMetadata(for: session.id)
+        XCTAssertEqual(read, SplitMetadata(title: "Neon Skyline", date: date, splitSeconds: 12.5))
     }
 
-    func testPurgeOnLaunchIsIdempotentWhenBaseMissing() {
-        let store = makeStore() // base never created
-        store.purgeOnLaunch()
+    func testReadMetadataReturnsNilWhenAbsent() throws {
+        let store = makeStore()
+        let session = try store.createSession()
+        XCTAssertNil(store.readMetadata(for: session.id))
+    }
+
+    func testWriteMetadataIsBestEffortForMissingSession() {
+        let store = makeStore()
+        store.writeMetadata(SplitMetadata(title: "Ghost"), for: UUID()) // must not throw/crash
         XCTAssertTrue(store.listSessions().isEmpty)
     }
 
@@ -189,9 +192,9 @@ final class SplitStoreTests: XCTestCase {
 
     // MARK: - Default location
 
-    func testDefaultBaseDirectoryIsCachesSplits() {
+    func testDefaultBaseDirectoryIsApplicationSupportSplits() {
         let url = SplitStore.defaultBaseDirectory()
         XCTAssertEqual(url.lastPathComponent, "Splits")
-        XCTAssertTrue(url.path.contains("Caches"))
+        XCTAssertTrue(url.path.contains("Application Support"), "history must not live in the purgeable Caches dir")
     }
 }

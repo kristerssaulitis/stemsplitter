@@ -190,7 +190,7 @@ public actor DemucsEngine: StemEngineProtocol {
         log.info("split done in \(Self.seconds(since: started), format: .fixed(precision: 1))s for \(probe.duration, format: .fixed(precision: 1))s audio")
 
         let tracks = names.indices.map { StemTrack(name: names[$0], url: urls[$0], peaks: peaks[$0].finish()) }
-        return SplitOutputs(vocalsURL: session.vocalsURL, instrumentalURL: session.instrumentalURL, stems: tracks)
+        return SplitOutputs(vocalsURL: session.vocalsURL, instrumentalURL: session.instrumentalURL, stems: tracks, sessionID: session.id)
     }
 
     /// Segment loop. Same weighting as demucs `apply_model`: triangle weights over

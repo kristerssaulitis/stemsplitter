@@ -1,14 +1,13 @@
 import Foundation
 
-/// One split session's output directory (`Caches/Splits/<uuid>/`, plan output
-/// lifecycle): playable on the result screen for the session, purged on next
-/// launch; Share / Save to Files is the persistence path.
+/// One split session's output directory (`<base>/<uuid>/`): playable on the
+/// result screen, listed in the user's history; deleted only from history.
 public struct SplitSession: Equatable, Sendable {
 
     /// Session identifier; the directory name under the store's base directory.
     public let id: UUID
 
-    /// `Caches/Splits/<id>/` — vocals.wav + instrumental.wav live here.
+    /// `<base>/<id>/` — the stem WAVs live here.
     public let directory: URL
 
     /// File URL where the vocals stem WAV is (or will be) written.
@@ -19,33 +18,54 @@ public struct SplitSession: Equatable, Sendable {
 
     /// `true` while the `.inprogress` marker exists — the session has not
     /// completed (or was interrupted: an orphan). Orphans are purged by
-    /// `purgeOrphans()` / `purgeOnLaunch()`.
+    /// `purgeOrphans()`.
     public let isInProgress: Bool
 }
 
-/// Lifecycle for per-session split output directories (plan T6; output lifecycle,
+/// Display metadata for one completed session, stored as `meta.json` inside the
+/// session dir. Written by the app layer on completion; absence (older sessions)
+/// falls back to a generic title.
+public struct SplitMetadata: Codable, Equatable, Sendable {
+
+    /// Display title (video title / filename without extension).
+    public var title: String
+
+    /// Completion date — the history list sorts on this.
+    public var date: Date
+
+    /// How long the split itself took (result-screen "split in Xs" line).
+    public var splitSeconds: TimeInterval
+
+    public init(title: String, date: Date = Date(), splitSeconds: TimeInterval = 0) {
+        self.title = title
+        self.date = date
+        self.splitSeconds = splitSeconds
+    }
+}
+
+/// Lifecycle for per-session split output directories (output lifecycle,
 /// orphan cleanup, eng E9 dir-level hygiene).
 ///
-/// Decisions encoded here, all from the approved plan:
-/// - Sessions live under `<base>/<uuid>/` where `base` is `Caches/Splits`
-///   (injectable for tests — plan verification bar: "session dir create/list
-///   under Caches/Splits/<uuid> with .inprogress marker").
+/// Decisions encoded here:
+/// - Sessions live under `<base>/<uuid>/` where `base` is `Application
+///   Support/Splits` (injectable for tests). History is user-facing persistence,
+///   so it must NOT live in Caches: the OS purges Caches under storage pressure,
+///   which would silently delete saved splits.
 /// - A session starts with a `.inprogress` marker file; completing removes it.
 ///   A dir still carrying the marker after the app died is an orphan.
-/// - `purgeOnLaunch()` wipes ALL session dirs: split output "purged on next
-///   launch; cold relaunch lands on the empty picker state".
-/// - `purgeOrphans()` wipes only dead (marker-carrying) sessions — the
-///   "Start again purges it before restarting" flow keeps completed output.
+/// - `purgeOrphans()` (launch + hygiene) wipes only dead (marker-carrying)
+///   sessions. Completed output survives until the user deletes it from
+///   history via `purgeSession(id:)`.
 /// - Listing validates: a completed dir whose WAV files carry garbage headers
 ///   (eng E9: interrupted writes leave garbage headers) is deleted, never
 ///   surfaced. Header-level backpatch rescue itself lives in WAVWriter (T5);
 ///   the store is the dir-level net.
 ///
 /// All filesystem state is rooted at the injected `baseDirectory`; nothing here
-/// touches the real caches directory unless given it.
+/// touches the real Application Support directory unless given it.
 public final class SplitStore: Sendable {
 
-    /// Root of all session dirs (e.g. `.../Caches/Splits`). Injectable for tests.
+    /// Root of all session dirs. Injectable for tests.
     public let baseDirectory: URL
 
     /// Marker file naming an unfinished session. Deliberately dot-prefixed so it
@@ -55,6 +75,9 @@ public final class SplitStore: Sendable {
     /// Output file names inside a session dir (contract `SplitOutputs`).
     public static let vocalsFileName = "vocals.wav"
     public static let instrumentalFileName = "instrumental.wav"
+
+    /// Display metadata file (`SplitMetadata`) inside a session dir.
+    public static let metadataFileName = "meta.json"
 
     /// The one failure this store raises: the named session does not exist.
     public enum SplitStoreError: Error, Equatable, Sendable {
@@ -67,11 +90,12 @@ public final class SplitStore: Sendable {
         self.baseDirectory = baseDirectory
     }
 
-    /// Production location: `<caches>/Splits` (plan output lifecycle). Tests inject
-    /// their own base directory instead of using this.
+    /// Production location: `Application Support/Splits` — user-facing history
+    /// must survive storage-pressure cache purges. Tests inject their own base
+    /// directory instead of using this.
     public static func defaultBaseDirectory() -> URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return caches.appendingPathComponent("Splits", isDirectory: true)
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return appSupport.appendingPathComponent("Splits", isDirectory: true)
     }
 
     /// Create a fresh session dir `<base>/<uuid>/` with the `.inprogress` marker
@@ -151,19 +175,29 @@ public final class SplitStore: Sendable {
         return sessions
     }
 
-    /// Plan output lifecycle: "purged on next launch". Deletes EVERY session dir
-    /// under the base — completed and orphan alike. Idempotent; a missing base is
-    /// a no-op. Best-effort: a dir that fails to delete never blocks launch.
-    public func purgeOnLaunch() {
-        for directory in existingSessionDirectories() {
-            try? FileManager.default.removeItem(at: directory)
-        }
+    /// Store display metadata (`meta.json`) inside a completed session's dir.
+    /// Best-effort: a missing session dir or an encode failure never throws —
+    /// history display falls back to a generic title.
+    public func writeMetadata(_ metadata: SplitMetadata, for id: UUID) {
+        let directory = sessionDirectory(for: id)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        guard let data = try? JSONEncoder().encode(metadata) else { return }
+        FileManager.default.createFile(
+            atPath: directory.appendingPathComponent(Self.metadataFileName).path,
+            contents: data)
+    }
+
+    /// Read a session's display metadata; `nil` when absent or undecodable
+    /// (callers fall back to a generic title and the dir's creation date).
+    public func readMetadata(for id: UUID) -> SplitMetadata? {
+        let url = sessionDirectory(for: id).appendingPathComponent(Self.metadataFileName)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(SplitMetadata.self, from: data)
     }
 
     /// Orphan purge: deletes only sessions still carrying the `.inprogress`
-    /// marker (dead sessions — the plan's "interrupted split leaves a partial
-    /// Caches/Splits/<uuid>/ dir; 'Start again' purges it"). Completed output
-    /// survives. Idempotent, best-effort.
+    /// marker (dead sessions — an interrupted split leaves a partial
+    /// `<base>/<uuid>/` dir). Completed output survives. Idempotent, best-effort.
     public func purgeOrphans() {
         for directory in existingSessionDirectories() {
             if FileManager.default.fileExists(

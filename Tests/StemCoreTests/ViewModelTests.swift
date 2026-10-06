@@ -89,14 +89,34 @@ final class ViewModelTests: XCTestCase {
 
     private func makeAppFlow(
         engine: MockEngine,
+        history: HistoryModel? = nil,
         probeError: StemError? = nil
     ) -> AppFlowModel {
         AppFlowModel(
             engine: engine,
+            history: history,
             makePreflight: { video in
                 PreflightModel(video: video, probeCheck: { _ in probeError })
             }
         )
+    }
+
+    /// Isolated history store base per test.
+    private func makeHistoryBase() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("history-tests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    /// A completed session with container-valid WAVs (headers only — the flow
+    /// test drives routing and listing, not decode quality).
+    private func writeSessionWAVs(_ session: SplitSession, store: SplitStore) throws {
+        var vocals = Data("RIFF".utf8)
+        vocals.append(Data(repeating: 0, count: 4))
+        vocals.append(Data("WAVE".utf8))
+        vocals.append(Data(repeating: 0xAB, count: 8))
+        try vocals.write(to: session.vocalsURL)
+        try vocals.write(to: session.instrumentalURL)
+        try store.markCompleted(session)
     }
 
     /// Drives the main actor until `predicate` holds (bounded cooperative loop;
@@ -441,7 +461,7 @@ final class ViewModelTests: XCTestCase {
 
     // MARK: - Session navigation (F9a)
 
-    func testNewSplitShowsExportFirstNoticeAndNextPickClearsIt() async {
+    func testNewSplitReturnsToPickerAndNextPickStartsFreshFlow() async {
         let engine = MockEngine(events: [
             .completed(SplitOutputs(vocalsURL: vocalsURL, instrumentalURL: instrumentalURL)),
         ])
@@ -452,12 +472,57 @@ final class ViewModelTests: XCTestCase {
         app.newSplit()
 
         XCTAssertEqual(app.route, .picker)
-        XCTAssertTrue(app.showsExportFirstNotice, "inline 'Export first — splits don't persist.' notice")
         XCTAssertNil(app.result)
+        XCTAssertFalse(app.resultIsFromHistory, "fresh result flag reset on new split")
 
         app.pick(makeVideo())
-        XCTAssertFalse(app.showsExportFirstNotice, "next pick clears the notice")
         XCTAssertEqual(app.route, .preflight)
+    }
+
+    // MARK: - History (saved splits)
+
+    func testCompletedSplitRecordsHistoryEntryAndReplaysFromHistory() async throws {
+        let store = SplitStore(baseDirectory: makeHistoryBase())
+        let session = try store.createSession()
+        try writeSessionWAVs(session, store: store)
+        let engine = MockEngine(events: [
+            .completed(SplitOutputs(
+                vocalsURL: session.vocalsURL,
+                instrumentalURL: session.instrumentalURL,
+                sessionID: session.id)),
+        ])
+        let app = makeAppFlow(engine: engine, history: HistoryModel(store: store))
+        await driveToProcessing(app, video: makeVideo())
+        await settleUntil { app.route == .result }
+
+        // The completed split is now the newest history entry, titled by video.
+        await settleUntil { app.history.entries.count == 1 }
+        XCTAssertEqual(app.history.entries.first?.title, "Concert")
+
+        // Reopen from history: result route in history mode, back keeps the entry.
+        app.newSplit()
+        await settleUntil { app.route == .picker }
+        app.openHistoryEntry(app.history.entries[0])
+        await settleUntil { app.route == .result && app.resultIsFromHistory }
+        XCTAssertEqual(app.result?.title, "Concert")
+        XCTAssertNotNil(app.result?.resultDate, "history replay shows the saved date")
+
+        app.closeHistoryResult()
+        XCTAssertEqual(app.route, .picker)
+        XCTAssertEqual(app.history.entries.count, 1, "closing a replay keeps the entry")
+    }
+
+    func testCompletedSplitWithoutSessionIDRecordsNoHistory() async {
+        let store = SplitStore(baseDirectory: makeHistoryBase())
+        let engine = MockEngine(events: [
+            .completed(SplitOutputs(vocalsURL: vocalsURL, instrumentalURL: instrumentalURL)),
+        ])
+        let app = makeAppFlow(engine: engine, history: HistoryModel(store: store))
+        await driveToProcessing(app, video: makeVideo())
+        await settleUntil { app.route == .result }
+
+        await settleUntil { app.history.entries.count == 0 }
+        XCTAssertTrue(app.history.entries.isEmpty, "sessionless outputs (mocks/tests) record nothing")
     }
 
     // MARK: - Interruption (F12)

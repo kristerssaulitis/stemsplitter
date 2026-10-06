@@ -989,7 +989,7 @@ private struct PipelineRun: Sendable {
             events.yield(.progress(fraction: 1))
             try vocals.finalize()
             try instrumental.finalize()
-            return SplitOutputs(vocalsURL: session.vocalsURL, instrumentalURL: session.instrumentalURL)
+            return SplitOutputs(vocalsURL: session.vocalsURL, instrumentalURL: session.instrumentalURL, sessionID: session.id)
         } catch {
             // Cancel/failure teardown (eng E1/E9): close and DELETE both partial files.
             vocals.abortAndDelete()

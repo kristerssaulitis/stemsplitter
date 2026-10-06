@@ -86,9 +86,14 @@ public final class AppFlowModel: ObservableObject {
     @Published public private(set) var processing: ProcessingModel?
     @Published public private(set) var result: ResultModel?
 
-    /// F9a: inline picker notice "Export first — splits don't persist." shown
-    /// after "New split" replaces the result.
-    @Published public private(set) var showsExportFirstNotice = false
+    /// The user's saved splits (history list, delete). Persisted across launches.
+    public let history: HistoryModel
+
+    /// `true` while `result` is a history replay (back button, not "new split").
+    @Published public private(set) var resultIsFromHistory = false
+
+    /// `true` while a history entry's stems/peaks are being loaded for open.
+    @Published public private(set) var isLoadingHistoryEntry = false
 
     /// F12: non-nil while the start-again modal is up.
     @Published public private(set) var startAgain: StartAgainState?
@@ -106,9 +111,11 @@ public final class AppFlowModel: ObservableObject {
 
     public init(
         engine: any StemEngineProtocol,
+        history: HistoryModel? = nil,
         makePreflight: (@MainActor (PickedVideo) -> PreflightModel)? = nil
     ) {
         self.engine = engine
+        self.history = history ?? HistoryModel()
         self.makePreflight = makePreflight ?? { PreflightModel(video: $0) }
     }
 
@@ -119,7 +126,6 @@ public final class AppFlowModel: ObservableObject {
     /// those states and this is the enforcing backstop.
     public func pick(_ video: PickedVideo) {
         guard route == .picker else { return }
-        showsExportFirstNotice = false
         self.video = video
         preflight = makePreflight(video)
         route = .preflight
@@ -168,12 +174,19 @@ public final class AppFlowModel: ObservableObject {
         switch terminal {
         case .completed(let outputs):
             guard let sourceURL = activeSourceURL else { return }
+            let title = video?.title ?? "Split"
+            let splitSeconds = processing?.elapsed ?? 0
             result = ResultModel(
-                title: video?.title ?? "Split",
+                title: title,
                 sourceURL: sourceURL,
                 outputs: outputs,
-                splitSeconds: processing?.elapsed ?? 0
+                splitSeconds: splitSeconds
             )
+            // The split is now the newest history entry (title + date persisted
+            // with the session dir; best-effort, never blocks the result screen).
+            if let sessionID = outputs.sessionID {
+                history.recordCompletion(id: sessionID, title: title, splitSeconds: splitSeconds)
+            }
             route = .result // AppFlowView fires the landing haptic on this transition (CEO-2)
         case .failed:
             // Stay on .processing; ProcessingView shows the error copy
@@ -200,11 +213,10 @@ public final class AppFlowModel: ObservableObject {
         route = .picker
     }
 
-    // MARK: Session navigation (F9a)
+    // MARK: Session navigation
 
-    /// "New split" replaces the result with the picker and the export-first
-    /// notice. Splits don't persist — Share / Save to Files is the persistence
-    /// path (plan output lifecycle).
+    /// "New split" replaces the result with the picker. Nothing is lost: the
+    /// split is already saved in history.
     public func newSplit() {
         guard route == .result else { return }
         result?.stop()
@@ -213,7 +225,38 @@ public final class AppFlowModel: ObservableObject {
         preflight = nil
         video = nil
         route = .picker
-        showsExportFirstNotice = true
+    }
+
+    // MARK: History (F-H1: saved splits)
+
+    /// Open a history entry: dismiss-list glue builds the mixer from the stored
+    /// stems (peaks decoded off-main, brief spinner), then routes to the result
+    /// screen in history mode. A vanished session just refreshes the list.
+    public func openHistoryEntry(_ entry: HistoryModel.Entry) {
+        guard route == .picker, isLoadingHistoryEntry == false else { return }
+        isLoadingHistoryEntry = true
+        Task {
+            let model = await history.makeResult(for: entry)
+            isLoadingHistoryEntry = false
+            guard let model else {
+                history.reload()
+                return
+            }
+            result?.stop()
+            result = model
+            resultIsFromHistory = true
+            route = .result
+        }
+    }
+
+    /// Leave a history replay's result screen (back button): back to the picker.
+    /// The entry stays in history.
+    public func closeHistoryResult() {
+        guard route == .result, resultIsFromHistory else { return }
+        result?.stop()
+        result = nil
+        resultIsFromHistory = false
+        route = .picker
     }
 
     // MARK: Interruption (F12)

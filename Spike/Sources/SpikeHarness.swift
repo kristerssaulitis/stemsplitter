@@ -376,7 +376,7 @@ enum SpikeHarness {
                 lowPowerMode: processInfo.isLowPowerModeEnabled),
             configuration: ConfigInfo(
                 modelID: MockSeparator.modelID,
-                computeUnits: String(describing: MLComputeUnits.all),
+                computeUnits: "all (MLComputeUnits.all — the shipping preference; the mock computes on CPU)",
                 queueCapacity: configuration.queueCapacity,
                 outputSampleRateHz: extractor.outputSampleRate,
                 outputChannels: 2),
@@ -445,8 +445,8 @@ enum SpikeHarness {
     }
 
     private static func writeAAC(url: URL, durationSeconds: Double) throws {
-        let writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
-        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+        nonisolated(unsafe) let writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
+        nonisolated(unsafe) let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: corpusSampleRate,
             AVNumberOfChannelsKey: 2,

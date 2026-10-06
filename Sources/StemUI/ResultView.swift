@@ -10,15 +10,18 @@ public struct ResultView: View {
 
     @ObservedObject var model: ResultModel
     let onNewSplit: () -> Void
+    /// Non-nil for a history replay: the header shows a back button (leaving
+    /// keeps the entry in history) instead of "new split".
+    var onBack: (() -> Void)?
 
     @StateObject private var video: VideoSync
     @State private var shareRequest: ShareRequest?
-    @State private var confirmLeave = false
     @State private var toastDismissTask: Task<Void, Never>?
 
-    init(model: ResultModel, onNewSplit: @escaping () -> Void) {
+    init(model: ResultModel, onNewSplit: @escaping () -> Void, onBack: (() -> Void)? = nil) {
         self.model = model
         self.onNewSplit = onNewSplit
+        self.onBack = onBack
         _video = StateObject(wrappedValue: VideoSync(url: model.sourceURL))
     }
 
@@ -66,11 +69,6 @@ public struct ResultView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
-        .confirmationDialog("Start a new split?", isPresented: $confirmLeave, titleVisibility: .visible) {
-            Button("New Split", role: .destructive, action: onNewSplit)
-        } message: {
-            Text("Export anything you want to keep first — this split won't be saved.")
-        }
         .onChange(of: model.exportToastVisible) { _, visible in
             guard visible else { return }
             #if os(iOS)
@@ -89,20 +87,30 @@ public struct ResultView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Button { confirmLeave = true } label: {
-                Image(systemName: "plus")
-                    .font(.body.weight(.semibold))
-                    .frame(width: 36, height: 36)
-                    .background(Circle().fill(Color.ssSurface))
+            if let onBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color.ssSurface))
+                }
+                .accessibilityLabel("Back to history")
+            } else {
+                Button(action: onNewSplit) {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color.ssSurface))
+                }
+                .accessibilityLabel("New split")
             }
-            .accessibilityLabel("New split")
 
             VStack(spacing: 1) {
                 Text(model.title)
                     .font(.headline)
                     .foregroundStyle(Color.ssTextPrimary)
                     .lineLimit(1)
-                Text("\(formatClock(model.duration)) · split in \(Int(model.splitSeconds.rounded()))s")
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(Color.ssTextSecondary)
             }
@@ -113,6 +121,15 @@ public struct ResultView: View {
         .foregroundStyle(Color.ssTextPrimary)
         .padding(.horizontal, DesignSystem.Spacing.unit2)
         .padding(.vertical, 8)
+    }
+
+    /// Fresh split: duration + how long the split took. History replay: the
+    /// date it was split.
+    private var subtitle: String {
+        if let date = model.resultDate {
+            return formatClock(model.duration) + " · " + date.formatted(date: .abbreviated, time: .shortened)
+        }
+        return "\(formatClock(model.duration)) · split in \(Int(model.splitSeconds.rounded()))s"
     }
 
     private var shareMenu: some View {

@@ -13,12 +13,13 @@ Deferred work from the CEO review (SELECTIVE EXPANSION, /autoplan 2026-10-01). D
 - **Priority:** P3.
 - **Depends on:** v1 shipped + evidence long-video splits are common.
 
-## TODO: 30-second preview split
+## TODO: 30-second preview split — PROMOTED 2026-10-01
+- **Status:** un-deferred; now scoped in the active increment plan (`PLAN.md`, build order row 3).
 - **What:** Split only the first ~30s first, let the user hear quality, then commit to the full run.
 - **Why:** Delight-scan candidate; kills the "wait 90s to discover quality is bad" risk on long sources.
 - **Pros:** Chunked pipeline already produces per-chunk output; preview is a stop-condition change.
 - **Cons:** Two-phase UX changes the processing screen semantics mid-v1.
-- **Context:** Deferred by CEO decision CEO-5 (P3).
+- **Context:** Deferred by CEO decision CEO-5 (P3); un-deferred by the 2026-10-01 next-increment plan.
 - **Effort:** human S-M / CC S.
 - **Priority:** P3.
 - **Depends on:** v1 shipped.
@@ -33,7 +34,45 @@ Deferred work from the CEO review (SELECTIVE EXPANSION, /autoplan 2026-10-01). D
 - **Priority:** P3.
 - **Depends on:** v2 (engine proven, model memory footprint known).
 
+## TODO: Tap-to-copy key/BPM chips
+- **What:** Tap a key/BPM/Camelot chip to copy its value.
+- **Why:** Producer workflow — paste key/BPM into a DAW session note.
+- **Context:** Deferred by CEO decision CEO-5 (display-only; no demand evidence yet). Revisit when
+  dogfood shows the chips getting used.
+- **Effort:** human S / CC S.
+- **Priority:** P3.
+- **Depends on:** key/BPM chips shipped (this increment, build order row 4).
+
+## TODO: Preview escape hatch (skip straight to full split)
+- **What:** A power-user affordance to bypass the 30 s preview and run the full split directly
+  (e.g., long-press on pick, or a banner "Split full now").
+- **Why:** Once a user trusts the quality, the preview is a detour on short-or-known sources.
+- **Context:** DX review candidate (Phase 2.5, 2026-10-01) — auto-run preview stays the default
+  (competitor move 1); the hatch is additive. Revisit only if dogfood surfaces friction.
+- **Effort:** human S / CC S.
+- **Priority:** P3.
+- **Depends on:** preview split shipped (build order row 3) + dogfood evidence of friction.
+
+## TODO: Streaming playback for >10-minute sources
+- **What:** Stream stem audio from disk instead of whole-file buffers so long videos play without
+  the 10-minute preflight cap.
+- **Why:** The eng review (2026-10-01) capped source duration at 10 minutes to protect the <400 MB
+  playback invariant; a 30-min video is >1 GB of stem PCM with whole-file buffers.
+- **Pros:** Removes the cap; long-form DJ sets / mixes become splittable.
+- **Cons:** AVAudioEngine file-streaming playback rework on the result screen; loop + pitch math
+  under streaming; real complexity for an unknown-demand case.
+- **Context:** StemMixer schedules whole-file buffers today (eng review finding E5). Revisit only
+  if dogfood hits the cap on real material.
+- **Effort:** human L / CC M.
+- **Priority:** P3.
+- **Depends on:** dogfood evidence of >10-minute sources.
+
 ## DONE (2026-10-01)
 - Audio-file import (Files app, `.fileImporter`).
 - 4-stem model: htdemucs via `DemucsEngine`, mixer UI with mute/solo/presets/pitch/speed,
   mix + video export.
+
+## DONE (2026-10-06)
+- History: splits persist across launches (Application Support/Splits — replaces
+  purge-on-launch), history sheet on Home (badge + swipe-to-delete + storage
+  footer), saved splits reopen in the mixer (audio-only replay, back navigation).

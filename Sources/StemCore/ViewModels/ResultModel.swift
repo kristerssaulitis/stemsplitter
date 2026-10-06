@@ -60,6 +60,9 @@ public final class ResultModel: ObservableObject {
     public let sourceURL: URL
     public let outputs: SplitOutputs
     public let splitSeconds: TimeInterval
+    /// Completion date for history replays (subtitle shows it instead of the
+    /// fresh split's "split in Xs"). `nil` for a fresh split.
+    public let resultDate: Date?
     @Published public private(set) var hasVideo = false
 
     /// The lanes: model stems in display order (instrumental is export-only).
@@ -70,7 +73,8 @@ public final class ResultModel: ObservableObject {
 
     public static let displayOrder = ["vocals", "drums", "bass", "other"]
 
-    public init(title: String, sourceURL: URL, outputs: SplitOutputs, splitSeconds: TimeInterval) {
+    public init(title: String, sourceURL: URL, outputs: SplitOutputs, splitSeconds: TimeInterval, resultDate: Date? = nil) {
+        self.resultDate = resultDate
         self.title = title
         self.sourceURL = sourceURL
         self.outputs = outputs
